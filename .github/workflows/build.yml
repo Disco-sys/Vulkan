@@ -1,25 +1,25 @@
-name: Build PanVK (Mali Vulkan) Only
+name: Build PanVK from GitLab Mirror
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-panvk:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Mesa
+      - name: Checkout Mesa (GitLab Mirror)
         uses: actions/checkout@v4
         with:
-          repository: 'Mesa3D/mesa'
+          repository: 'mesa/mesa' # This is the official GitHub mirror of the GitLab repo
           fetch-depth: 1
 
-      - name: Install Android NDK
+      - name: Setup NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r25c
 
-      - name: Create Minimal Cross-File
+      - name: Create Cross File
         run: |
           cat <<EOF > android-aarch64.txt
           [binaries]
@@ -27,7 +27,6 @@ jobs:
           cpp = '${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang++'
           ar = '${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'
           strip = '${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip'
-
           [host_machine]
           system = 'android'
           cpu_family = 'aarch64'
@@ -35,33 +34,27 @@ jobs:
           endian = 'little'
           EOF
 
-      - name: Build PanVK Only
+      - name: Install Dependencies
+        run: sudo apt-get install -y meson ninja-build pkg-config bison flex python3-mako
+
+      - name: Configure Mesa
         run: |
-          # The "brain" (NIR/Panfrost common) is automatically built when panvk is requested
-          meson setup build \
+          meson setup build-android \
             --cross-file android-aarch64.txt \
             -Dbuildtype=release \
             -Dplatforms=android \
-            -Dgallium-drivers=panfrost \
             -Dvulkan-drivers=panvk \
+            -Dgallium-drivers=panfrost \
             -Dauto_features=disabled \
-            -Dgallium-vdpau=disabled \
-            -Dgallium-va=disabled \
-            -Dgallium-xa=disabled \
-            -Dgles1=disabled \
-            -Dgles2=disabled \
-            -Dopengl=false \
-            -Dgbm=disabled \
-            -Degl=disabled \
-            -Dllvm=disabled \
-            -Dlmsensors=disabled \
-            -Dshared-glapi=disabled \
-            --prefix=$(pwd)/install
+            -Dandroid-stub=true
 
-          ninja -C build install
+      - name: Compile PanVK "Brain" and Driver Only
+        run: |
+          # Specifically targeting the .so file avoids building the whole project
+          ninja -C build-android src/panfrost/vulkan/libvulkan_panfrost.so
 
-      - name: Upload PanVK Driver
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: panvk-driver-armv8
-          path: build/src/panfrost/vulkan/libvulkan_panfrost.so
+          name: panvk-android-armv8
+          path: build-android/src/panfrost/vulkan/libvulkan_panfrost.so
